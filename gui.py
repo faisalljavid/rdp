@@ -4,8 +4,10 @@ Native GNOME / Libadwaita desktop application for Phone Remote Desktop.
 Provides a modern visual window with toggle switch, QR code, and copyable connection link.
 """
 
+import os
 import io
 import sys
+import signal
 import threading
 import asyncio
 
@@ -19,6 +21,285 @@ import qrcode
 
 from config import parse_args, get_or_create_auth_token, get_or_create_credentials
 from main import RemoteDesktopApp, get_lan_ip
+
+
+SNI_XML = """
+<node>
+  <interface name="org.kde.StatusNotifierItem">
+    <property name="Category" type="s" access="read"/>
+    <property name="Id" type="s" access="read"/>
+    <property name="Title" type="s" access="read"/>
+    <property name="Status" type="s" access="read"/>
+    <property name="WindowId" type="i" access="read"/>
+    <property name="IconName" type="s" access="read"/>
+    <property name="IconThemePath" type="s" access="read"/>
+    <property name="Menu" type="o" access="read"/>
+    <property name="ItemIsMenu" type="b" access="read"/>
+    <property name="OverlayIconName" type="s" access="read"/>
+    <property name="AttentionIconName" type="s" access="read"/>
+    <property name="AttentionMovieName" type="s" access="read"/>
+    <method name="ContextMenu">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="Activate">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="SecondaryActivate">
+      <arg name="x" type="i" direction="in"/>
+      <arg name="y" type="i" direction="in"/>
+    </method>
+    <method name="Scroll">
+      <arg name="delta" type="i" direction="in"/>
+      <arg name="orientation" type="s" direction="in"/>
+    </method>
+    <method name="ProvideXdgActivationToken">
+      <arg name="token" type="s" direction="in"/>
+    </method>
+    <signal name="NewTitle"/>
+    <signal name="NewIcon"/>
+    <signal name="NewStatus">
+      <arg name="status" type="s"/>
+    </signal>
+  </interface>
+</node>
+"""
+
+MENU_XML = """
+<node>
+  <interface name="com.canonical.dbusmenu">
+    <property name="Version" type="u" access="read"/>
+    <property name="TextDirection" type="s" access="read"/>
+    <property name="Status" type="s" access="read"/>
+    <property name="IconThemePath" type="as" access="read"/>
+    <method name="GetLayout">
+      <arg name="parentId" type="i" direction="in"/>
+      <arg name="recursionDepth" type="i" direction="in"/>
+      <arg name="propertyNames" type="as" direction="in"/>
+      <arg name="revision" type="u" direction="out"/>
+      <arg name="layout" type="(ia{sv}av)" direction="out"/>
+    </method>
+    <method name="GetGroupProperties">
+      <arg name="ids" type="ai" direction="in"/>
+      <arg name="propertyNames" type="as" direction="in"/>
+      <arg name="properties" type="a(ia{sv})" direction="out"/>
+    </method>
+    <method name="GetProperty">
+      <arg name="id" type="i" direction="in"/>
+      <arg name="name" type="s" direction="in"/>
+      <arg name="value" type="v" direction="out"/>
+    </method>
+    <method name="Event">
+      <arg name="id" type="i" direction="in"/>
+      <arg name="eventId" type="s" direction="in"/>
+      <arg name="data" type="v" direction="in"/>
+      <arg name="timestamp" type="u" direction="in"/>
+    </method>
+    <method name="EventGroup">
+      <arg name="events" type="a(isvu)" direction="in"/>
+      <arg name="idErrors" type="ai" direction="out"/>
+    </method>
+    <method name="AboutToShow">
+      <arg name="id" type="i" direction="in"/>
+      <arg name="needUpdate" type="b" direction="out"/>
+    </method>
+    <method name="AboutToShowGroup">
+      <arg name="ids" type="ai" direction="in"/>
+      <arg name="updatesNeeded" type="ai" direction="out"/>
+      <arg name="idErrors" type="ai" direction="out"/>
+    </method>
+    <signal name="LayoutUpdated">
+      <arg name="revision" type="u"/>
+      <arg name="parent" type="i"/>
+    </signal>
+  </interface>
+</node>
+"""
+
+
+class StatusNotifierTray:
+    """
+    Pure D-Bus StatusNotifierItem (org.kde.StatusNotifierItem) and DBusMenu
+    (com.canonical.dbusmenu) implementation for top panel tray integration in GNOME / KDE.
+    Avoids any GTK 3 dependencies so it works seamlessly inside GTK 4 / Libadwaita.
+    """
+
+    def __init__(self, app_id="phone-rdp", title="Phone Remote Desktop", icon_name="phone-rdp", on_show=None, on_quit=None):
+        self.app_id = app_id
+        self.title = title
+        self.icon_name = icon_name
+        self.on_show = on_show
+        self.on_quit = on_quit
+        self.is_registered = False
+
+        self._bus_conn = None
+        self._owner_id = None
+        self._sni_reg_id = None
+        self._menu_reg_id = None
+
+        self._sni_info = Gio.DBusNodeInfo.new_for_xml(SNI_XML).interfaces[0]
+        self._menu_info = Gio.DBusNodeInfo.new_for_xml(MENU_XML).interfaces[0]
+
+        bus_name = f"org.freedesktop.StatusNotifierItem-{os.getpid()}-1"
+        self._bus_name = bus_name
+        self._owner_id = Gio.bus_own_name(
+            Gio.BusType.SESSION,
+            bus_name,
+            Gio.BusNameOwnerFlags.NONE,
+            self._on_bus_acquired,
+            self._on_name_acquired,
+            self._on_name_lost,
+        )
+
+    def _on_bus_acquired(self, conn, name):
+        self._bus_conn = conn
+        try:
+            self._sni_reg_id = conn.register_object(
+                "/StatusNotifierItem",
+                self._sni_info,
+                self._sni_method_call,
+                self._sni_get_prop,
+                None,
+            )
+            self._menu_reg_id = conn.register_object(
+                "/MenuBar",
+                self._menu_info,
+                self._menu_method_call,
+                self._menu_get_prop,
+                None,
+            )
+
+            # Register with desktop StatusNotifierWatcher
+            conn.call_sync(
+                "org.kde.StatusNotifierWatcher",
+                "/StatusNotifierWatcher",
+                "org.kde.StatusNotifierWatcher",
+                "RegisterStatusNotifierItem",
+                GLib.Variant("(s)", (name,)),
+                None,
+                Gio.DBusCallFlags.NONE,
+                2000,
+                None,
+            )
+            self.is_registered = True
+        except Exception as e:
+            err_str = str(e)
+            if "ServiceUnknown" in err_str or "NameHasNoOwner" in err_str:
+                self.is_registered = False
+            else:
+                # Registered with watcher even if watcher threw on signal broadcast
+                self.is_registered = True
+
+    def _on_name_acquired(self, conn, name):
+        pass
+
+    def _on_name_lost(self, conn, name):
+        self.is_registered = False
+
+    def _sni_method_call(self, connection, sender, object_path, interface_name, method_name, parameters, invocation):
+        if method_name in ("Activate", "SecondaryActivate"):
+            if self.on_show:
+                GLib.idle_add(self.on_show)
+        invocation.return_value(None)
+
+    def _sni_get_prop(self, connection, sender, object_path, interface_name, property_name):
+        props = {
+            "Category": GLib.Variant("s", "ApplicationStatus"),
+            "Id": GLib.Variant("s", self.app_id),
+            "Title": GLib.Variant("s", self.title),
+            "Status": GLib.Variant("s", "Active"),
+            "WindowId": GLib.Variant("i", 0),
+            "IconName": GLib.Variant("s", self.icon_name),
+            "IconThemePath": GLib.Variant("s", os.path.expanduser("~/.local/share/icons")),
+            "Menu": GLib.Variant("o", "/MenuBar"),
+            "ItemIsMenu": GLib.Variant("b", False),
+            "OverlayIconName": GLib.Variant("s", ""),
+            "AttentionIconName": GLib.Variant("s", ""),
+            "AttentionMovieName": GLib.Variant("s", ""),
+        }
+        return props.get(property_name)
+
+    def _menu_method_call(self, connection, sender, object_path, interface_name, method_name, parameters, invocation):
+        if method_name == "GetLayout":
+            raw_item1 = (
+                1,
+                {"label": GLib.Variant("s", "Show Phone Remote Desktop"), "enabled": GLib.Variant("b", True)},
+                [],
+            )
+            raw_item2 = (
+                2,
+                {"label": GLib.Variant("s", "Exit"), "enabled": GLib.Variant("b", True)},
+                [],
+            )
+            raw_root = (
+                0,
+                {},
+                [GLib.Variant("(ia{sv}av)", raw_item1), GLib.Variant("(ia{sv}av)", raw_item2)],
+            )
+            invocation.return_value(GLib.Variant("(u(ia{sv}av))", (1, raw_root)))
+        elif method_name == "GetGroupProperties":
+            items = [
+                (1, {"label": GLib.Variant("s", "Show Phone Remote Desktop"), "enabled": GLib.Variant("b", True)}),
+                (2, {"label": GLib.Variant("s", "Exit"), "enabled": GLib.Variant("b", True)}),
+            ]
+            invocation.return_value(GLib.Variant("(a(ia{sv}))", (items,)))
+        elif method_name == "GetProperty":
+            mid, prop_name = parameters.unpack()
+            labels = {1: "Show Phone Remote Desktop", 2: "Exit"}
+            if prop_name == "label" and mid in labels:
+                invocation.return_value(GLib.Variant("(v)", (GLib.Variant("s", labels[mid]),)))
+            elif prop_name == "enabled":
+                invocation.return_value(GLib.Variant("(v)", (GLib.Variant("b", True),)))
+            else:
+                invocation.return_value(GLib.Variant("(v)", (GLib.Variant("s", ""),)))
+        elif method_name == "Event":
+            mid, event_type, data, ts = parameters.unpack()
+            if event_type == "clicked":
+                if mid == 1 and self.on_show:
+                    GLib.idle_add(self.on_show)
+                elif mid == 2 and self.on_quit:
+                    GLib.idle_add(self.on_quit)
+            invocation.return_value(None)
+        elif method_name == "EventGroup":
+            invocation.return_value(GLib.Variant("(ai)", ([],)))
+        elif method_name == "AboutToShow":
+            invocation.return_value(GLib.Variant("(b)", (False,)))
+        elif method_name == "AboutToShowGroup":
+            invocation.return_value(GLib.Variant("(aiai)", ([], [])))
+        else:
+            invocation.return_value(None)
+
+    def _menu_get_prop(self, connection, sender, object_path, interface_name, property_name):
+        props = {
+            "Version": GLib.Variant("u", 3),
+            "Status": GLib.Variant("s", "normal"),
+            "TextDirection": GLib.Variant("s", "ltr"),
+            "IconThemePath": GLib.Variant("as", []),
+        }
+        return props.get(property_name)
+
+    def destroy(self):
+        if self._bus_conn:
+            if self._sni_reg_id:
+                try:
+                    self._bus_conn.unregister_object(self._sni_reg_id)
+                except Exception:
+                    pass
+                self._sni_reg_id = None
+            if self._menu_reg_id:
+                try:
+                    self._bus_conn.unregister_object(self._menu_reg_id)
+                except Exception:
+                    pass
+                self._menu_reg_id = None
+        if self._owner_id:
+            try:
+                Gio.bus_unown_name(self._owner_id)
+            except Exception:
+                pass
+            self._owner_id = None
+        self.is_registered = False
 
 
 class PhoneRdpWindow(Adw.ApplicationWindow):
@@ -85,7 +366,7 @@ class PhoneRdpWindow(Adw.ApplicationWindow):
 
         # Credentials Group
         creds_group = Adw.PreferencesGroup()
-        creds_group.set_title("Security & Credentials")
+        creds_group.set_title("Security &amp; Credentials")
 
         # Username Row
         self.user_row = Adw.ActionRow()
@@ -129,6 +410,15 @@ class PhoneRdpWindow(Adw.ApplicationWindow):
         # Generate QR code & start server
         self._update_qr_code(self.lan_url)
         self._start_rdp_server()
+
+        # Tray Icon setup
+        self.tray = StatusNotifierTray(
+            app_id="phone-rdp",
+            title="Phone Remote Desktop",
+            icon_name=self._get_tray_icon(),
+            on_show=self._show_window,
+            on_quit=self._quit_application,
+        )
 
         self.connect("close-request", self._on_close_request)
 
@@ -251,8 +541,33 @@ class PhoneRdpWindow(Adw.ApplicationWindow):
             self._stop_rdp_server()
             self.switch_row.set_subtitle("Server stopped")
 
-    def _on_close_request(self, window):
+    def _get_tray_icon(self) -> str:
+        system_icon = os.path.expanduser("~/.local/share/icons/hicolor/scalable/apps/phone-rdp.svg")
+        if os.path.isfile(system_icon):
+            return system_icon
+        repo_icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "phone-rdp.svg")
+        if os.path.isfile(repo_icon):
+            return repo_icon
+        return "phone-rdp"
+
+    def _show_window(self):
+        self.set_visible(True)
+        self.present()
+
+    def _quit_application(self):
         self._stop_rdp_server()
+        if self.tray:
+            self.tray.destroy()
+            self.tray = None
+        app = self.get_application()
+        if app:
+            app.quit()
+
+    def _on_close_request(self, window):
+        if self.tray and self.tray.is_registered:
+            self.set_visible(False)
+            return True
+        self._quit_application()
         return False
 
 
@@ -263,15 +578,18 @@ class PhoneRdpApplication(Adw.Application):
             flags=Gio.ApplicationFlags.FLAGS_NONE,
         )
         self.cli_args = cli_args
+        self.main_window = None
 
     def do_activate(self):
-        win = self.props.active_window
-        if not win:
-            win = PhoneRdpWindow(self, self.cli_args)
-        win.present()
+        if not self.main_window:
+            self.hold()
+            self.main_window = PhoneRdpWindow(self, self.cli_args)
+        self.main_window.set_visible(True)
+        self.main_window.present()
 
 
 def main():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
     cli_args = parse_args()
     app = PhoneRdpApplication(cli_args)
     return app.run(sys.argv[:1])

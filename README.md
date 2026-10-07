@@ -104,6 +104,10 @@ Install the application into your GNOME App Grid:
 Now search for **"Phone Remote Desktop"** in your GNOME application menu or press `Super` and launch it.
 
 The desktop app provides:
+- **Top Panel System Tray Integration**: Displays a native tray icon in the GNOME top panel (AppIndicator / StatusNotifierItem) just like Cloudflare WARP and Blip.
+- **Close-to-Hide Background Persistence**: Clicking the window close button (`✕`) hides the window without stopping the server, ensuring uninterrupted phone access from any room.
+- **Instant Window Restoration**: Click the top panel icon or launch "Phone Remote Desktop" from the GNOME App Grid / Dash at any time to unhide the window.
+- **Tray Context Menu**: Right-click the top-panel icon to choose **"Show Phone Remote Desktop"** or **"Exit"** (which cleanly shuts down the server and exits).
 - **Visual QR Code**: Point your phone camera at the screen to open the URL.
 - **Server Toggle**: Turn remote desktop capture and input listening on/off anytime.
 - **Connection URL**: Click the copy icon to copy your LAN URL.
