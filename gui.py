@@ -8,18 +8,17 @@ import io
 import sys
 import threading
 import asyncio
-from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, Adw, GLib, Gio, Gdk, GdkPixbuf
+from gi.repository import Gtk, Adw, GLib, Gio, GdkPixbuf
 
 import qrcode
 
 from config import parse_args, get_or_create_auth_token, get_or_create_credentials
-from main import RemoteDesktopApp, get_lan_ip, get_tailscale_ip
+from main import RemoteDesktopApp, get_lan_ip
 
 
 class PhoneRdpWindow(Adw.ApplicationWindow):
@@ -134,8 +133,11 @@ class PhoneRdpWindow(Adw.ApplicationWindow):
         self.connect("close-request", self._on_close_request)
 
     def _build_url(self) -> str:
-        import socket
         scheme = "http" if self.cli_args.no_ssl else "https"
+        lan_ip = get_lan_ip()
+        if lan_ip and lan_ip != "127.0.0.1":
+            return f"{scheme}://{lan_ip}:{self.cli_args.port}/?token={self.auth_token}"
+        import socket
         hostname = socket.gethostname().split('.')[0]
         return f"{scheme}://{hostname}.local:{self.cli_args.port}/?token={self.auth_token}"
 

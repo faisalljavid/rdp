@@ -4,8 +4,6 @@ Handles static asset serving, auth token verification, rate limiting,
 frame dispatching with backpressure drop, and input routing.
 """
 
-import os
-import sys
 import json
 import time
 import asyncio

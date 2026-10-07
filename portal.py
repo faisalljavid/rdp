@@ -16,7 +16,7 @@ gi.require_version("Gio", "2.0")
 gi.require_version("GLib", "2.0")
 from gi.repository import Gio, GLib
 
-from config import get_saved_restore_token, save_restore_token
+from config import save_restore_token
 
 
 class GLibLoopThread:
@@ -92,6 +92,8 @@ class PortalManager:
         self.stream_width: int = 1920
         self.stream_height: int = 1080
         self.restore_token: Optional[str] = None
+        self._last_abs_pos: Optional[tuple[float, float]] = None
+        self._use_rel_fallback: bool = False
 
         self._pending_requests: dict[str, queue.Queue] = {}
         self._signal_sub_id: Optional[int] = None
@@ -102,7 +104,6 @@ class PortalManager:
 
     def _subscribe_signals(self):
         """Subscribe to portal Request Response signals and Session Closed signals."""
-        request_path_prefix = f"/org/freedesktop/portal/desktop/request/{self.sender_id}"
         self._signal_sub_id = self.bus.signal_subscribe(
             self.PORTAL_BUS_NAME,
             self.INTERFACE_REQUEST,
@@ -321,10 +322,19 @@ class PortalManager:
         if not self.session_handle or self.stream_node_id is None:
             return
 
+        if self._use_rel_fallback:
+            if self._last_abs_pos:
+                dx = x - self._last_abs_pos[0]
+                dy = y - self._last_abs_pos[1]
+                if abs(dx) > 0.1 or abs(dy) > 0.1:
+                    self.notify_pointer_motion(dx, dy)
+            self._last_abs_pos = (x, y)
+            return
+
         # Upstream xdg-desktop-portal bug #2077 causes check_position() to reject
         # absolute pointer events on some Wayland streams with 'Invalid position (0)'.
-        # We try absolute positioning; on error, we silently fall back to relative motion
-        # so the laptop cursor tracks the phone touch smoothly with zero error spam.
+        # We try absolute positioning; on error, we fall back to relative motion
+        # so the laptop cursor tracks smoothly without repeating failing D-Bus calls.
         try:
             self.bus.call_sync(
                 self.PORTAL_BUS_NAME,
@@ -342,8 +352,8 @@ class PortalManager:
             )
             self._last_abs_pos = (x, y)
         except Exception:
-            # Fallback: calculate delta from last known position and use relative motion
-            if hasattr(self, "_last_abs_pos") and self._last_abs_pos:
+            self._use_rel_fallback = True
+            if self._last_abs_pos:
                 dx = x - self._last_abs_pos[0]
                 dy = y - self._last_abs_pos[1]
                 if abs(dx) > 0.1 or abs(dy) > 0.1:

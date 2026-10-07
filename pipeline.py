@@ -3,13 +3,11 @@ GStreamer PipeWire Video Capture & JPEG Streaming Pipeline.
 """
 
 import sys
-import threading
 from typing import Callable, Optional
 
 import gi
 gi.require_version("Gst", "1.0")
-gi.require_version("GLib", "2.0")
-from gi.repository import Gst, GLib
+from gi.repository import Gst
 
 Gst.init(None)
 

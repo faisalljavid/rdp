@@ -4,9 +4,6 @@ Wayland Remote Desktop Host for Fedora GNOME.
 Streams screen via PipeWire & GStreamer, receives touch & keyboard from phone.
 """
 
-import os
-import sys
-import time
 import socket
 import signal
 import asyncio
@@ -181,13 +178,13 @@ class RemoteDesktopApp:
         print(f"  • Web User Login    : Username: \033[1;37m{self.credentials['username']}\033[0m")
         if self.is_new_creds and "initial_password" in self.credentials:
             print(f"                        Password: \033[1;33m{self.credentials['initial_password']}\033[0m")
-            print(f"                        (Change anytime: python3 main.py --set-password)")
+            print("                        (Change anytime: python3 main.py --set-password)")
         else:
-            print(f"                        Password: [saved in ~/.config/rdp/auth.json]")
-            print(f"                        (Change anytime: python3 main.py --set-password)")
+            print("                        Password: [saved in ~/.config/rdp/auth.json]")
+            print("                        (Change anytime: python3 main.py --set-password)")
         print(f"  • Security Protocol : {'Plain HTTP/WS' if self.args.no_ssl else 'HTTPS/WSS (Self-signed TLS)'}")
         print("-" * 64)
-        print(f"  Connect from your phone (No QR scanning required):")
+        print("  Connect from your phone (No QR scanning required):")
         print(f"    Web Login   : \033[1;32m{login_url}\033[0m")
         print(f"    LAN IP      : \033[1;32m{lan_login}\033[0m")
         if tailscale_ip:
