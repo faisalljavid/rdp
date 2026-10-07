@@ -31,13 +31,26 @@
   const hiddenKeyInput = document.getElementById("hidden-key-input");
 
   const authModal = document.getElementById("auth-modal");
-  const tokenInput = document.getElementById("token-input");
-  const btnAuthSubmit = document.getElementById("btn-auth-submit");
+  const loginForm = document.getElementById("login-form");
+  const usernameInput = document.getElementById("username-input");
+  const passwordInput = document.getElementById("password-input");
   const authError = document.getElementById("auth-error");
+
+  const btnSettings = document.getElementById("btn-settings");
+  const settingsModal = document.getElementById("settings-modal");
+  const settingsForm = document.getElementById("settings-form");
+  const settingsUsernameInput = document.getElementById("settings-username-input");
+  const settingsNewPwInput = document.getElementById("settings-new-pw-input");
+  const settingsConfirmPwInput = document.getElementById("settings-confirm-pw-input");
+  const settingsError = document.getElementById("settings-error");
+  const settingsSuccess = document.getElementById("settings-success");
+  const btnSettingsCancel = document.getElementById("btn-settings-cancel");
 
   // State
   let ws = null;
   let authToken = null;
+  let currentUsername = "";
+  let pendingLogin = null;
   let streamWidth = 1920;
   let streamHeight = 1080;
   let isConnected = false;
@@ -93,11 +106,21 @@
     return params.get(name);
   }
 
-  authToken = getQueryParam("token") || localStorage.getItem("rdp_auth_token");
-
   function saveToken(token) {
+    if (!token) return;
     authToken = token;
-    localStorage.setItem("rdp_auth_token", token);
+    try {
+      localStorage.setItem("rdp_auth_token", token);
+    } catch (e) {}
+  }
+
+  const urlToken = getQueryParam("token");
+  if (urlToken) {
+    saveToken(urlToken);
+  } else {
+    try {
+      authToken = localStorage.getItem("rdp_auth_token");
+    } catch (e) {}
   }
 
   // --- WebSocket Connection ---
@@ -121,8 +144,12 @@
     }
 
     ws.onopen = () => {
-      // If we don't have a token, show prompt
-      if (!authToken) {
+      if (pendingLogin) {
+        ws.send(JSON.stringify({ type: "login", ...pendingLogin }));
+        pendingLogin = null;
+      } else if (authToken) {
+        ws.send(JSON.stringify({ type: "auth", session_token: authToken }));
+      } else {
         showAuthModal();
       }
       startPing();
@@ -148,7 +175,9 @@
       isConnected = false;
       updateStatus("disconnected", "Disconnected");
       if (evt.code === 4003) {
-        showAuthModal("Authentication failed or rate limited.");
+        authToken = null;
+        try { localStorage.removeItem("rdp_auth_token"); } catch (e) {}
+        showAuthModal("Authentication failed or session expired.");
       } else {
         scheduleReconnect();
       }
@@ -179,6 +208,12 @@
   function handleJsonMessage(msg) {
     if (msg.type === "auth_result") {
       if (msg.success) {
+        if (msg.session_token) {
+          saveToken(msg.session_token);
+        }
+        if (msg.username) {
+          currentUsername = msg.username;
+        }
         hideAuthModal();
         isConnected = true;
         updateStatus("connected", "Connected");
@@ -189,7 +224,36 @@
         }
       } else {
         isConnected = false;
+        authToken = null;
+        try { localStorage.removeItem("rdp_auth_token"); } catch (e) {}
         showAuthModal(msg.error || "Authentication failed");
+      }
+    } else if (msg.type === "change_password_result") {
+      if (msg.success) {
+        if (msg.session_token) {
+          saveToken(msg.session_token);
+        }
+        if (msg.username) {
+          currentUsername = msg.username;
+        }
+        if (settingsSuccess) {
+          settingsSuccess.textContent = "Password updated successfully!";
+          settingsSuccess.classList.remove("hidden");
+        }
+        if (settingsError) {
+          settingsError.classList.add("hidden");
+        }
+        setTimeout(() => {
+          hideSettingsModal();
+        }, 1200);
+      } else {
+        if (settingsError) {
+          settingsError.textContent = msg.error || "Failed to update password.";
+          settingsError.classList.remove("hidden");
+        }
+        if (settingsSuccess) {
+          settingsSuccess.classList.add("hidden");
+        }
       }
     } else if (msg.type === "pong") {
       const now = performance.now();
@@ -258,23 +322,120 @@
     } else {
       authError.classList.add("hidden");
     }
-    tokenInput.focus();
+    if (usernameInput) {
+      if (!usernameInput.value) {
+        usernameInput.focus();
+      } else if (passwordInput) {
+        passwordInput.focus();
+      }
+    }
   }
 
   function hideAuthModal() {
     authModal.classList.add("hidden");
+    if (passwordInput) {
+      passwordInput.value = "";
+    }
   }
 
-  btnAuthSubmit.addEventListener("click", () => {
-    const val = tokenInput.value.trim();
-    if (!val) return;
-    saveToken(val);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "auth", token: val }));
-    } else {
-      connect();
+  if (loginForm) {
+    loginForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const username = usernameInput ? usernameInput.value.trim() : "";
+      const password = passwordInput ? passwordInput.value : "";
+      if (!username || !password) return;
+
+      if (authError) {
+        authError.classList.add("hidden");
+      }
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "login", username, password }));
+      } else {
+        pendingLogin = { username, password };
+        connect();
+      }
+    });
+  }
+
+  // --- Settings / Change Password Modal ---
+  function showSettingsModal() {
+    if (!settingsModal) return;
+    settingsModal.classList.remove("hidden");
+    if (settingsError) settingsError.classList.add("hidden");
+    if (settingsSuccess) settingsSuccess.classList.add("hidden");
+    if (settingsUsernameInput) {
+      settingsUsernameInput.value = currentUsername || (usernameInput ? usernameInput.value : "");
     }
-  });
+    if (settingsNewPwInput) {
+      settingsNewPwInput.value = "";
+      settingsNewPwInput.focus();
+    }
+    if (settingsConfirmPwInput) {
+      settingsConfirmPwInput.value = "";
+    }
+  }
+
+  function hideSettingsModal() {
+    if (settingsModal) {
+      settingsModal.classList.add("hidden");
+    }
+    if (settingsSuccess) {
+      settingsSuccess.classList.add("hidden");
+    }
+    if (settingsError) {
+      settingsError.classList.add("hidden");
+    }
+  }
+
+  if (btnSettings) {
+    btnSettings.addEventListener("click", showSettingsModal);
+  }
+
+  if (btnSettingsCancel) {
+    btnSettingsCancel.addEventListener("click", hideSettingsModal);
+  }
+
+  if (settingsForm) {
+    settingsForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const user = settingsUsernameInput ? settingsUsernameInput.value.trim() : "";
+      const p1 = settingsNewPwInput ? settingsNewPwInput.value : "";
+      const p2 = settingsConfirmPwInput ? settingsConfirmPwInput.value : "";
+
+      if (!p1) {
+        if (settingsError) {
+          settingsError.textContent = "Password cannot be empty.";
+          settingsError.classList.remove("hidden");
+        }
+        return;
+      }
+
+      if (p1 !== p2) {
+        if (settingsError) {
+          settingsError.textContent = "Passwords do not match.";
+          settingsError.classList.remove("hidden");
+        }
+        return;
+      }
+
+      if (settingsError) settingsError.classList.add("hidden");
+      if (settingsSuccess) settingsSuccess.classList.add("hidden");
+
+      if (ws && ws.readyState === WebSocket.OPEN && isConnected) {
+        ws.send(JSON.stringify({
+          type: "change_password",
+          username: user,
+          new_password: p1
+        }));
+      } else {
+        if (settingsError) {
+          settingsError.textContent = "Not connected to server.";
+          settingsError.classList.remove("hidden");
+        }
+      }
+    });
+  }
 
   // --- Coordinate Mapping ---
   function mapClientToStreamCoords(clientX, clientY) {

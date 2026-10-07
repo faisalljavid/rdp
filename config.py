@@ -5,7 +5,10 @@ Configuration and security helpers for Wayland Remote Desktop.
 import os
 import sys
 import ssl
+import json
 import secrets
+import getpass
+import hashlib
 import argparse
 import datetime
 from pathlib import Path
@@ -18,6 +21,7 @@ RESTORE_TOKEN_FILE = CONFIG_DIR / "restore_token"
 CERT_FILE = CONFIG_DIR / "cert.pem"
 KEY_FILE = CONFIG_DIR / "key.pem"
 TOKEN_FILE = CONFIG_DIR / "token"
+AUTH_FILE = CONFIG_DIR / "auth.json"
 
 
 def get_saved_restore_token() -> str | None:
@@ -66,6 +70,80 @@ def get_or_create_auth_token(cli_token: str | None = None) -> str:
     except Exception:
         pass
     return new_token
+
+
+def hash_password(password: str, salt: bytes | None = None) -> tuple[str, str]:
+    """Hashes a password with scrypt and a cryptographic salt."""
+    if salt is None:
+        salt = secrets.token_bytes(16)
+    pw_hash = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1)
+    return salt.hex(), pw_hash.hex()
+
+
+def verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
+    """Verifies a password against the stored scrypt salt and hash in constant time."""
+    try:
+        salt = bytes.fromhex(salt_hex)
+        pw_hash = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=16384, r=8, p=1)
+        return secrets.compare_digest(pw_hash.hex(), hash_hex)
+    except Exception:
+        return False
+
+
+def save_credentials(username: str, password: str) -> dict:
+    """Saves user credentials with salted scrypt hash to auth.json."""
+    salt_hex, hash_hex = hash_password(password)
+    creds = {
+        "username": username.strip(),
+        "salt": salt_hex,
+        "hash": hash_hex,
+    }
+    AUTH_FILE.write_text(json.dumps(creds, indent=2))
+    AUTH_FILE.chmod(0o600)
+    return creds
+
+
+def load_credentials() -> dict | None:
+    """Loads stored credentials from auth.json if present and valid."""
+    if AUTH_FILE.exists():
+        try:
+            data = json.loads(AUTH_FILE.read_text())
+            if "username" in data and "salt" in data and "hash" in data:
+                return data
+        except Exception:
+            pass
+    return None
+
+
+def get_or_create_credentials(
+    cli_username: str | None = None,
+    cli_password: str | None = None,
+) -> tuple[dict, bool]:
+    """
+    Returns (credentials_dict, is_newly_generated).
+    If custom username or password provided via CLI, updates auth.json.
+    If no auth.json exists, creates default credentials.
+    """
+    if cli_username and cli_password:
+        creds = save_credentials(cli_username, cli_password)
+        return creds, False
+
+    if cli_password and not cli_username:
+        existing = load_credentials()
+        user = existing["username"] if existing else getpass.getuser()
+        creds = save_credentials(user, cli_password)
+        return creds, False
+
+    existing = load_credentials()
+    if existing:
+        return existing, False
+
+    # First-time setup: generate clean default credentials
+    default_user = getpass.getuser()
+    generated_pw = secrets.token_urlsafe(8)
+    creds = save_credentials(default_user, generated_pw)
+    creds["initial_password"] = generated_pw
+    return creds, True
 
 
 def ensure_self_signed_cert() -> tuple[Path, Path]:
@@ -167,6 +245,23 @@ def parse_args():
         "--reset-portal",
         action="store_true",
         help="Clear saved portal restore token to force re-selection of screen",
+    )
+    parser.add_argument(
+        "--username",
+        type=str,
+        default=None,
+        help="Set or update web login username",
+    )
+    parser.add_argument(
+        "--password",
+        type=str,
+        default=None,
+        help="Set or update web login password",
+    )
+    parser.add_argument(
+        "--set-password",
+        action="store_true",
+        help="Interactively set web login username and password",
     )
     parser.add_argument(
         "--mock",

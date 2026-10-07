@@ -6,7 +6,11 @@
   <meta name="theme-color" content="#121212">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PC Remote">
   <title>Wayland Remote Desktop</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/icon.svg">
+  <link rel="apple-touch-icon" href="/icon.svg">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -34,6 +38,9 @@
         </button>
         <button id="btn-kbd" class="tool-btn" title="Toggle Keyboard">
           <span>⌨️</span>
+        </button>
+        <button id="btn-settings" class="tool-btn" title="Change Password / Settings">
+          <span>⚙️</span>
         </button>
         <button id="btn-fullscreen" class="tool-btn" title="Fullscreen">
           <span>⛶</span>
@@ -77,14 +84,66 @@
     <!-- Hidden input to invoke native phone virtual keyboard -->
     <input type="text" id="hidden-key-input" class="hidden-key-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
 
-    <!-- Auth Modal Dialog -->
+    <!-- Auth Login Modal Dialog -->
     <div id="auth-modal" class="modal-overlay hidden">
       <div class="modal-card">
-        <h3>Connect to Laptop</h3>
-        <p>Enter the authentication token shown in your laptop terminal:</p>
-        <input type="password" id="token-input" placeholder="Token" autocomplete="current-password">
-        <div id="auth-error" class="error-msg hidden"></div>
-        <button id="btn-auth-submit" class="primary-btn">Connect</button>
+        <div class="login-brand">
+          <img src="/icon.svg" width="48" height="48" alt="Logo" class="login-icon">
+          <h3>Sign In to PC</h3>
+          <p>Enter your credentials to control this laptop</p>
+        </div>
+
+        <form id="login-form" autocomplete="on">
+          <div class="input-group">
+            <label for="username-input">Username</label>
+            <input type="text" id="username-input" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" autocorrect="off" required>
+          </div>
+
+          <div class="input-group">
+            <label for="password-input">Password</label>
+            <input type="password" id="password-input" name="password" placeholder="Password" autocomplete="current-password" required>
+          </div>
+
+          <div id="auth-error" class="error-msg hidden"></div>
+
+          <button type="submit" id="btn-auth-submit" class="primary-btn">Sign In</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Settings / Change Password Modal Dialog -->
+    <div id="settings-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="login-brand">
+          <img src="/icon.svg" width="48" height="48" alt="Logo" class="login-icon">
+          <h3>Change Password</h3>
+          <p>Update credentials for remote access</p>
+        </div>
+
+        <form id="settings-form">
+          <div class="input-group">
+            <label for="settings-username-input">Username</label>
+            <input type="text" id="settings-username-input" name="username" placeholder="Username" autocomplete="username" autocapitalize="none" autocorrect="off" required>
+          </div>
+
+          <div class="input-group">
+            <label for="settings-new-pw-input">New Password</label>
+            <input type="password" id="settings-new-pw-input" name="new-password" placeholder="New Password" autocomplete="new-password" required>
+          </div>
+
+          <div class="input-group">
+            <label for="settings-confirm-pw-input">Confirm Password</label>
+            <input type="password" id="settings-confirm-pw-input" name="confirm-password" placeholder="Confirm Password" autocomplete="new-password" required>
+          </div>
+
+          <div id="settings-error" class="error-msg hidden"></div>
+          <div id="settings-success" class="success-msg hidden"></div>
+
+          <div class="form-buttons">
+            <button type="button" id="btn-settings-cancel" class="cancel-btn">Cancel</button>
+            <button type="submit" id="btn-settings-save" class="primary-btn">Save</button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

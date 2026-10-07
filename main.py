@@ -17,6 +17,8 @@ from config import (
     parse_args,
     get_or_create_auth_token,
     create_ssl_context,
+    get_or_create_credentials,
+    save_credentials,
 )
 from portal import PortalManager, MockPortalManager
 from pipeline import VideoPipeline
@@ -69,6 +71,10 @@ class RemoteDesktopApp:
     def __init__(self, args):
         self.args = args
         self.auth_token = get_or_create_auth_token(args.token)
+        self.credentials, self.is_new_creds = get_or_create_credentials(
+            cli_username=getattr(args, "username", None),
+            cli_password=getattr(args, "password", None),
+        )
         self.ssl_context = create_ssl_context(args.no_ssl)
 
         self.portal: Optional[PortalManager] = None
@@ -146,12 +152,21 @@ class RemoteDesktopApp:
         if self.server:
             self.server.broadcast_frame(frame_bytes)
 
+    def update_credentials(self, new_credentials: dict):
+        """Update credentials and forward to running server."""
+        self.credentials = new_credentials
+        if self.server:
+            self.server.update_credentials(new_credentials)
+
     def print_startup_banner(self):
         scheme = "http" if self.args.no_ssl else "https"
         lan_ip = get_lan_ip()
         tailscale_ip = get_tailscale_ip()
+        hostname = socket.gethostname().split('.')[0]
 
-        lan_url = f"{scheme}://{lan_ip}:{self.args.port}/?token={self.auth_token}"
+        login_url = f"{scheme}://{hostname}.local:{self.args.port}/"
+        lan_login = f"{scheme}://{lan_ip}:{self.args.port}/"
+        token_url = f"{scheme}://{hostname}.local:{self.args.port}/?token={self.auth_token}"
 
         print("=" * 64)
         if self.args.mock:
@@ -163,17 +178,24 @@ class RemoteDesktopApp:
         print(f"  • Screen Resolution : {self.portal.stream_width}x{self.portal.stream_height}")
         print(f"  • Target Framerate  : {self.args.fps} FPS")
         print(f"  • JPEG Quality      : {self.args.quality}%")
-        print(f"  • Auth Token        : {self.auth_token}")
+        print(f"  • Web User Login    : Username: \033[1;37m{self.credentials['username']}\033[0m")
+        if self.is_new_creds and "initial_password" in self.credentials:
+            print(f"                        Password: \033[1;33m{self.credentials['initial_password']}\033[0m")
+            print(f"                        (Change anytime: python3 main.py --set-password)")
+        else:
+            print(f"                        Password: [saved in ~/.config/rdp/auth.json]")
+            print(f"                        (Change anytime: python3 main.py --set-password)")
         print(f"  • Security Protocol : {'Plain HTTP/WS' if self.args.no_ssl else 'HTTPS/WSS (Self-signed TLS)'}")
         print("-" * 64)
-        print(f"  Connect from your phone:")
-        print(f"    LAN URL       : \033[1;32m{lan_url}\033[0m")
+        print(f"  Connect from your phone (No QR scanning required):")
+        print(f"    Web Login   : \033[1;32m{login_url}\033[0m")
+        print(f"    LAN IP      : \033[1;32m{lan_login}\033[0m")
         if tailscale_ip:
-            ts_url = f"{scheme}://{tailscale_ip}:{self.args.port}/?token={self.auth_token}"
-            print(f"    Tailscale URL : \033[1;36m{ts_url}\033[0m")
+            ts_url = f"{scheme}://{tailscale_ip}:{self.args.port}/"
+            print(f"    Tailscale   : \033[1;36m{ts_url}\033[0m")
         print("=" * 64)
 
-        print_qr_code(lan_url)
+        print_qr_code(token_url)
 
         if not self.args.no_ssl:
             print("Note on Self-Signed HTTPS:")
@@ -193,6 +215,7 @@ class RemoteDesktopApp:
             auth_token=self.auth_token,
             portal=self.portal,
             ssl_context=self.ssl_context,
+            credentials=self.credentials,
         )
         await self.server.start()
 
@@ -203,6 +226,9 @@ class RemoteDesktopApp:
         await self._shutdown_event.wait()
 
     def shutdown(self):
+        if getattr(self, "_is_shutting_down", False):
+            return
+        self._is_shutting_down = True
         print("\n[app] Shutting down Remote Desktop...")
         self._shutdown_event.set()
 
@@ -217,6 +243,29 @@ class RemoteDesktopApp:
 
 def main():
     args = parse_args()
+
+    # Handle interactive --set-password
+    if getattr(args, "set_password", False):
+        import getpass
+        default_user = getpass.getuser()
+        print("=" * 50)
+        print("  Set Phone Remote Desktop Web Credentials")
+        print("=" * 50)
+        user_input = input(f"Username [{default_user}]: ").strip()
+        user = user_input or default_user
+
+        while True:
+            p1 = getpass.getpass("Enter password: ").strip()
+            if not p1:
+                print("Password cannot be empty. Try again.")
+                continue
+            p2 = getpass.getpass("Confirm password: ").strip()
+            if p1 == p2:
+                save_credentials(user, p1)
+                print(f"\n[✓] Credentials updated successfully for user '{user}'.")
+                return
+            print("Passwords do not match. Try again.\n")
+
     app = RemoteDesktopApp(args)
 
     loop = asyncio.new_event_loop()
@@ -224,8 +273,6 @@ def main():
 
     def handle_signal():
         app.shutdown()
-        # Schedule stopping event loop
-        loop.stop()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:

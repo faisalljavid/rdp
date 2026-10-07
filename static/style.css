@@ -328,6 +328,39 @@ html, body {
   line-height: 1.4;
 }
 
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.login-icon {
+  margin-bottom: 4px;
+  border-radius: 12px;
+}
+
+#login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.input-group label {
+  font-size: 12px;
+  font-weight: 500;
+  color: #9aa5b5;
+}
+
 .modal-card input {
   height: 42px;
   background: #0d1117;
@@ -358,7 +391,45 @@ html, body {
 
 .error-msg {
   color: #f87171;
-  font-size: 12px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.success-msg {
+  background: rgba(46, 160, 67, 0.15);
+  border: 1px solid #2ea043;
+  color: #3fb950;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.form-buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.form-buttons .primary-btn {
+  flex: 1;
+}
+
+.cancel-btn {
+  flex: 1;
+  height: 42px;
+  background: #21262d;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.cancel-btn:hover {
+  background: #30363d;
 }
 
 .visually-hidden {

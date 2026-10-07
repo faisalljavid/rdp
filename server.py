@@ -14,10 +14,12 @@ from urllib.parse import urlparse, parse_qs
 from typing import Optional, Set
 
 import websockets
+import secrets
 from websockets.asyncio.server import serve, ServerConnection, Request, Response
 from websockets.datastructures import Headers
 
 from portal import PortalManager
+from config import verify_password
 
 STATIC_DIR = Path(__file__).parent / "static"
 
@@ -84,17 +86,26 @@ class RdpServer:
         auth_token: str,
         portal: PortalManager,
         ssl_context=None,
+        credentials: Optional[dict] = None,
     ):
         self.host = host
         self.port = port
         self.auth_token = auth_token
+        self.credentials = credentials
         self.portal = portal
         self.ssl_context = ssl_context
 
         self.rate_limiter = RateLimiter(max_attempts=5, window_seconds=60.0)
         self.clients: Set[ClientSession] = set()
+        self.valid_sessions: Set[str] = set()
         self.server = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def update_credentials(self, new_credentials: dict):
+        """Dynamically update credentials and invalidate old session tokens."""
+        self.credentials = new_credentials
+        self.valid_sessions.clear()
+        print(f"[auth] Credentials updated for user '{new_credentials.get('username')}'. Active sessions refreshed.")
 
     def broadcast_frame(self, frame_bytes: bytes):
         """Called by GStreamer thread on each encoded frame."""
@@ -133,8 +144,12 @@ class RdpServer:
         elif path == "/app.js":
             file_path = STATIC_DIR / "app.js"
             content_type = "application/javascript; charset=utf-8"
-        elif path == "/favicon.ico":
-            return Response(204, "No Content", Headers(), b"")
+        elif path == "/manifest.json":
+            file_path = STATIC_DIR / "manifest.json"
+            content_type = "application/manifest+json; charset=utf-8"
+        elif path == "/icon.svg" or path == "/favicon.ico":
+            file_path = STATIC_DIR / "icon.svg"
+            content_type = "image/svg+xml"
         else:
             return Response(
                 404,
@@ -189,13 +204,14 @@ class RdpServer:
             return
 
         if token_param:
-            if token_param == self.auth_token:
+            if token_param == self.auth_token or token_param in self.valid_sessions:
                 session.authenticated = True
                 self.rate_limiter.record_success(client_ip)
                 print(f"[auth] Client {client_ip} authenticated via URL parameter.")
                 await session.send_json({
                     "type": "auth_result",
                     "success": True,
+                    "session_token": token_param,
                     "screen": {
                         "width": self.portal.stream_width,
                         "height": self.portal.stream_height,
@@ -222,7 +238,54 @@ class RdpServer:
 
                 msg_type = msg.get("type")
 
-                # Auth challenge message
+                # Username & Password Login
+                if msg_type == "login":
+                    if self.rate_limiter.is_blocked(client_ip):
+                        await session.send_json({
+                            "type": "auth_result",
+                            "success": False,
+                            "error": "Rate limit exceeded. Try again in 60 seconds.",
+                        })
+                        continue
+
+                    candidate_user = str(msg.get("username", "")).strip()
+                    candidate_pass = str(msg.get("password", ""))
+
+                    valid = False
+                    if self.credentials:
+                        expected_user = self.credentials.get("username", "")
+                        salt = self.credentials.get("salt", "")
+                        h = self.credentials.get("hash", "")
+                        if candidate_user == expected_user and verify_password(candidate_pass, salt, h):
+                            valid = True
+
+                    if valid:
+                        session_token = secrets.token_urlsafe(32)
+                        self.valid_sessions.add(session_token)
+                        session.authenticated = True
+                        self.rate_limiter.record_success(client_ip)
+                        print(f"[auth] User '{candidate_user}' logged in successfully from {client_ip}")
+                        await session.send_json({
+                            "type": "auth_result",
+                            "success": True,
+                            "session_token": session_token,
+                            "username": candidate_user,
+                            "screen": {
+                                "width": self.portal.stream_width,
+                                "height": self.portal.stream_height,
+                            },
+                        })
+                    else:
+                        self.rate_limiter.record_failure(client_ip)
+                        print(f"[auth] Failed login attempt for user '{candidate_user}' from {client_ip}")
+                        await session.send_json({
+                            "type": "auth_result",
+                            "success": False,
+                            "error": "Invalid username or password",
+                        })
+                    continue
+
+                # Session token or auth challenge message
                 if msg_type == "auth":
                     if self.rate_limiter.is_blocked(client_ip):
                         await session.send_json({
@@ -232,14 +295,15 @@ class RdpServer:
                         })
                         continue
 
-                    candidate_token = msg.get("token", "")
-                    if candidate_token == self.auth_token:
+                    candidate_token = msg.get("session_token") or msg.get("token") or ""
+                    if candidate_token and (candidate_token in self.valid_sessions or candidate_token == self.auth_token):
                         session.authenticated = True
                         self.rate_limiter.record_success(client_ip)
-                        print(f"[auth] Client {client_ip} successfully authenticated.")
+                        print(f"[auth] Client {client_ip} authenticated via stored session.")
                         await session.send_json({
                             "type": "auth_result",
                             "success": True,
+                            "session_token": candidate_token,
                             "screen": {
                                 "width": self.portal.stream_width,
                                 "height": self.portal.stream_height,
@@ -247,16 +311,46 @@ class RdpServer:
                         })
                     else:
                         self.rate_limiter.record_failure(client_ip)
-                        print(f"[auth] Failed token attempt from {client_ip}")
+                        print(f"[auth] Invalid session attempt from {client_ip}")
                         await session.send_json({
                             "type": "auth_result",
                             "success": False,
-                            "error": "Invalid token",
+                            "error": "Session expired or invalid. Please sign in.",
                         })
                     continue
 
                 # Ignore non-auth messages from unauthenticated clients
                 if not session.authenticated:
+                    continue
+
+                # Change password request from authenticated client
+                if msg_type == "change_password":
+                    new_user = str(msg.get("username", "")).strip() or (self.credentials.get("username", "") if self.credentials else "")
+                    new_pass = str(msg.get("new_password", ""))
+
+                    if not new_pass or len(new_pass) < 1:
+                        await session.send_json({
+                            "type": "change_password_result",
+                            "success": False,
+                            "error": "New password cannot be empty.",
+                        })
+                        continue
+
+                    from config import save_credentials
+                    new_creds = save_credentials(new_user, new_pass)
+                    self.update_credentials(new_creds)
+
+                    # Keep current client authenticated with fresh session token
+                    new_session_token = secrets.token_urlsafe(32)
+                    self.valid_sessions.add(new_session_token)
+
+                    await session.send_json({
+                        "type": "change_password_result",
+                        "success": True,
+                        "session_token": new_session_token,
+                        "username": new_user,
+                    })
+                    print(f"[auth] User '{new_user}' updated password from {client_ip}")
                     continue
 
                 # Latency Ping/Pong
