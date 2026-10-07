@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Phone Remote Desktop
+Comment=Control your laptop screen from your phone browser
+Exec=/home/faisalljavid/projects/rdp/gui.py
+Icon=phone-rdp
+Terminal=false
+Type=Application
+Categories=Utility;Network;RemoteAccess;
+Keywords=rdp;remote;desktop;phone;vnc;wayland;
+StartupNotify=true
+StartupWMClass=io.github.phoneremote.desktop
