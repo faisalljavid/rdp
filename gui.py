@@ -119,8 +119,7 @@ class PhoneRdpWindow(Adw.ApplicationWindow):
 
         stream = Gio.MemoryInputStream.new_from_data(png_bytes)
         pixbuf = GdkPixbuf.Pixbuf.new_from_stream(stream, None)
-        texture = Gdk.Texture.new_for_pixbuf(pixbuf)
-        self.qr_picture.set_paintable(texture)
+        self.qr_picture.set_pixbuf(pixbuf)
 
     def _on_copy_clicked(self, btn):
         clipboard = self.get_display().get_clipboard()

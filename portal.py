@@ -44,9 +44,22 @@ class GLibLoopThread:
             self._loop.quit()
 
 
-# Global GLib thread
-_glib_thread = GLibLoopThread()
-_glib_thread.start()
+_glib_thread = None
+
+
+def ensure_glib_loop():
+    """Starts a background GLib thread only if a GTK/Adwaita main loop is not already running."""
+    global _glib_thread
+    if "gi.repository.Gtk" in sys.modules:
+        try:
+            from gi.repository import Gtk
+            if Gtk.is_initialized():
+                return
+        except Exception:
+            pass
+    if _glib_thread is None:
+        _glib_thread = GLibLoopThread()
+        _glib_thread.start()
 
 
 class PortalManager:
@@ -68,6 +81,7 @@ class PortalManager:
     BTN_MIDDLE = 274
 
     def __init__(self, on_session_closed: Optional[Callable[[], None]] = None):
+        ensure_glib_loop()
         self.bus: Gio.DBusConnection = Gio.bus_get_sync(Gio.BusType.SESSION, None)
         self.sender_id = self.bus.get_unique_name()[1:].replace(".", "_")
 
