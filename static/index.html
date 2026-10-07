@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#121212">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Wayland Remote Desktop</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app-container">
+    <!-- Main Display Canvas -->
+    <div id="viewport">
+      <canvas id="display-canvas"></canvas>
+      <div id="touch-indicator" class="touch-indicator"></div>
+    </div>
+
+    <!-- Top Floating Toolbar -->
+    <header id="top-toolbar">
+      <div class="toolbar-left">
+        <div id="status-pill" class="status-pill connecting">
+          <span class="status-dot"></span>
+          <span id="status-text">Connecting...</span>
+        </div>
+        <span id="stats-text" class="stats-text">0 FPS • 0ms</span>
+      </div>
+
+      <div class="toolbar-right">
+        <button id="btn-mode" class="tool-btn" title="Toggle Touch/Trackpad Mode">
+          <span id="mode-icon">👆</span>
+          <span id="mode-label">Direct</span>
+        </button>
+        <button id="btn-kbd" class="tool-btn" title="Toggle Keyboard">
+          <span>⌨️</span>
+        </button>
+        <button id="btn-fullscreen" class="tool-btn" title="Fullscreen">
+          <span>⛶</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Floating Special Keys & Keyboard Bar -->
+    <div id="keyboard-drawer" class="keyboard-drawer hidden">
+      <!-- Special Keys Row -->
+      <div class="keys-scroll-container">
+        <div class="keys-row">
+          <button class="key-btn" data-key="Escape">Esc</button>
+          <button class="key-btn" data-key="Tab">Tab</button>
+          <button class="key-btn mod-key" id="mod-ctrl" data-key="Control_L">Ctrl</button>
+          <button class="key-btn mod-key" id="mod-alt" data-key="Alt_L">Alt</button>
+          <button class="key-btn mod-key" id="mod-super" data-key="Super_L">Super</button>
+          <button class="key-btn" data-key="Return">Enter</button>
+          <button class="key-btn" data-key="BackSpace">⌫</button>
+          <button class="key-btn" data-key="Delete">Del</button>
+          <button class="key-btn" data-key="Left">←</button>
+          <button class="key-btn" data-key="Up">↑</button>
+          <button class="key-btn" data-key="Down">↓</button>
+          <button class="key-btn" data-key="Right">→</button>
+        </div>
+      </div>
+
+      <!-- Quick Text Input Row for typing/pasting -->
+      <div class="text-input-row">
+        <input type="text" id="quick-text-input" placeholder="Type or paste text to laptop..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <button id="btn-send-text" class="action-btn">Send</button>
+      </div>
+    </div>
+
+    <!-- Hidden input to invoke native phone virtual keyboard -->
+    <input type="text" id="hidden-key-input" class="visually-hidden" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+
+    <!-- Auth Modal Dialog -->
+    <div id="auth-modal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <h3>Connect to Laptop</h3>
+        <p>Enter the authentication token shown in your laptop terminal:</p>
+        <input type="password" id="token-input" placeholder="Token" autocomplete="current-password">
+        <div id="auth-error" class="error-msg hidden"></div>
+        <button id="btn-auth-submit" class="primary-btn">Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

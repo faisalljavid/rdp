@@ -1,0 +1,15 @@
+[Unit]
+Description=Wayland Remote Desktop Host (Fedora GNOME)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+# Ensure session environment variables (WAYLAND_DISPLAY, DBUS_SESSION_BUS_ADDRESS) are present
+ExecStart=%h/projects/rdp/main.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=graphical-session.target
