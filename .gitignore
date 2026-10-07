@@ -1,0 +1,15 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Temporary and swap files
+*~
+*.swp
+*.swo
+
+# Local runtime auth/tokens (never commit credentials or certs)
+token
+auth.json
+*.pem
+restore_token
