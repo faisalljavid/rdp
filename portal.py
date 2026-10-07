@@ -5,6 +5,7 @@ Uses Gio D-Bus to communicate with org.freedesktop.portal.Desktop.
 
 import os
 import sys
+import time
 import uuid
 import queue
 import threading
@@ -423,6 +424,31 @@ class PortalManager:
         except Exception as e:
             print(f"[portal] notify_pointer_axis error: {e}", file=sys.stderr)
 
+    def notify_keyboard_keycode(self, keycode: int, state: int):
+        """
+        Press or release key by Linux evdev keycode.
+        state: 1 = pressed, 0 = released
+        """
+        if not self.session_handle:
+            return
+        try:
+            self.bus.call_sync(
+                self.PORTAL_BUS_NAME,
+                self.PORTAL_OBJECT_PATH,
+                self.INTERFACE_REMOTE_DESKTOP,
+                "NotifyKeyboardKeycode",
+                GLib.Variant(
+                    "(oa{sv}iu)",
+                    (self.session_handle, {}, int(keycode), int(state)),
+                ),
+                None,
+                Gio.DBusCallFlags.NONE,
+                -1,
+                None,
+            )
+        except Exception as e:
+            print(f"[portal] notify_keyboard_keycode error: {e}", file=sys.stderr)
+
     def notify_keyboard_keysym(self, keysym: int, state: int):
         """
         Press or release key by XKB keysym.
@@ -448,27 +474,81 @@ class PortalManager:
         except Exception as e:
             print(f"[portal] notify_keyboard_keysym error: {e}", file=sys.stderr)
 
-    def send_key_click(self, keysym: int):
-        """Convenience function: press and release a keysym."""
-        self.notify_keyboard_keysym(keysym, 1)
-        self.notify_keyboard_keysym(keysym, 0)
+    def send_keycode_click(self, keycode: int):
+        """Press and release a Linux evdev keycode with a short hold delay."""
+        self.notify_keyboard_keycode(keycode, 1)
+        time.sleep(0.015)
+        self.notify_keyboard_keycode(keycode, 0)
+
+    def send_key_click(self, keysym: int = None, keycode: int = None):
+        """
+        Press and release a key with debounce hold delay.
+        Tries hardware keycode first if provided, falling back to keysym.
+        """
+        done = False
+        if keycode is not None:
+            try:
+                self.send_keycode_click(keycode)
+                done = True
+            except Exception as e:
+                print(f"[portal] send_keycode_click fallback: {e}", file=sys.stderr)
+        if not done and keysym is not None:
+            self.notify_keyboard_keysym(keysym, 1)
+            time.sleep(0.015)
+            self.notify_keyboard_keysym(keysym, 0)
+
+    # Standard evdev keycodes for US layout: (evdev_code, requires_shift)
+    ASCII_TO_EVDEV = {
+        '\n': (28, False), '\r': (28, False),
+        '\t': (15, False),
+        '\b': (14, False),
+        ' ': (57, False),
+        '1': (2, False), '2': (3, False), '3': (4, False), '4': (5, False), '5': (6, False),
+        '6': (7, False), '7': (8, False), '8': (9, False), '9': (10, False), '0': (11, False),
+        '-': (12, False), '=': (13, False),
+        'a': (30, False), 'b': (48, False), 'c': (46, False), 'd': (32, False), 'e': (18, False),
+        'f': (33, False), 'g': (34, False), 'h': (35, False), 'i': (23, False), 'j': (36, False),
+        'k': (37, False), 'l': (38, False), 'm': (50, False), 'n': (49, False), 'o': (24, False),
+        'p': (25, False), 'q': (16, False), 'r': (19, False), 's': (31, False), 't': (20, False),
+        'u': (22, False), 'v': (47, False), 'w': (17, False), 'x': (45, False), 'y': (21, False),
+        'z': (44, False),
+        '[': (26, False), ']': (27, False), ';': (39, False), "'": (40, False), '`': (41, False),
+        '\\': (43, False), ',': (51, False), '.': (52, False), '/': (53, False),
+        # Shifted characters
+        '!': (2, True), '@': (3, True), '#': (4, True), '$': (5, True), '%': (6, True),
+        '^': (7, True), '&': (8, True), '*': (9, True), '(': (10, True), ')': (11, True),
+        '_': (12, True), '+': (13, True),
+        'A': (30, True), 'B': (48, True), 'C': (46, True), 'D': (32, True), 'E': (18, True),
+        'F': (33, True), 'G': (34, True), 'H': (35, True), 'I': (23, True), 'J': (36, True),
+        'K': (37, True), 'L': (38, True), 'M': (50, True), 'N': (49, True), 'O': (24, True),
+        'P': (25, True), 'Q': (16, True), 'R': (19, True), 'S': (31, True), 'T': (20, True),
+        'U': (22, True), 'V': (47, True), 'W': (17, True), 'X': (45, True), 'Y': (21, True),
+        'Z': (44, True),
+        '{': (26, True), '}': (27, True), ':': (39, True), '"': (40, True), '~': (41, True),
+        '|': (43, True), '<': (51, True), '>': (52, True), '?': (53, True),
+    }
 
     def send_text(self, text: str):
-        """Types string characters one by one by translating to XKB keysyms."""
+        """Types string characters with accurate keycode and keysym injection."""
+        KEY_LEFTSHIFT = 42
         for char in text:
-            code = ord(char)
-            if char == "\n" or char == "\r":
-                keysym = 0xFF0D  # XK_Return
-            elif char == "\t":
-                keysym = 0xFF09  # XK_Tab
-            elif char == "\b":
-                keysym = 0xFF08  # XK_BackSpace
-            elif code < 0x100:
-                keysym = code
+            if char in self.ASCII_TO_EVDEV:
+                keycode, shift = self.ASCII_TO_EVDEV[char]
+                if shift:
+                    self.notify_keyboard_keycode(KEY_LEFTSHIFT, 1)
+                    time.sleep(0.005)
+                self.send_keycode_click(keycode)
+                if shift:
+                    time.sleep(0.005)
+                    self.notify_keyboard_keycode(KEY_LEFTSHIFT, 0)
             else:
-                # Direct Unicode mapping in XKB: 0x01000000 + code
-                keysym = 0x01000000 + code
-            self.send_key_click(keysym)
+                code = ord(char)
+                if code < 0x100:
+                    keysym = code
+                else:
+                    keysym = 0x01000000 + code
+                self.send_key_click(keysym=keysym)
+            time.sleep(0.008)
 
     def close(self):
         """Closes the RemoteDesktop portal session and cleans up file descriptors."""
@@ -527,12 +607,19 @@ class MockPortalManager:
     def notify_pointer_axis(self, dx: float, dy: float):
         print(f"[mock-portal] Pointer Scroll Axis -> dx={dx:.2f}, dy={dy:.2f}")
 
+    def notify_keyboard_keycode(self, keycode: int, state: int):
+        action = "PRESS" if state == 1 else "RELEASE"
+        print(f"[mock-portal] Keyboard Keycode {keycode} -> {action}")
+
     def notify_keyboard_keysym(self, keysym: int, state: int):
         action = "PRESS" if state == 1 else "RELEASE"
         print(f"[mock-portal] Keyboard Keysym {hex(keysym)} -> {action}")
 
-    def send_key_click(self, keysym: int):
-        print(f"[mock-portal] Keyboard Key Click -> {hex(keysym)}")
+    def send_keycode_click(self, keycode: int):
+        print(f"[mock-portal] Keyboard Keycode Click -> {keycode}")
+
+    def send_key_click(self, keysym: int = None, keycode: int = None):
+        print(f"[mock-portal] Keyboard Key Click -> keysym={hex(keysym) if keysym else None}, keycode={keycode}")
 
     def send_text(self, text: str):
         print(f"[mock-portal] Text Injected -> {repr(text)}")

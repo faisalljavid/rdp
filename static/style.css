@@ -234,6 +234,37 @@ html, body {
   background: #1d4ed8;
 }
 
+.action-btn.secondary-btn {
+  background: #374151;
+  padding: 0 12px;
+}
+
+.action-btn.secondary-btn:active {
+  background: #4b5563;
+}
+
+.key-btn.special-btn {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+}
+
+.key-btn.special-btn:active {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.key-btn.shortcut-btn {
+  background: rgba(245, 158, 11, 0.15);
+  border-color: rgba(245, 158, 11, 0.3);
+  color: #fcd34d;
+}
+
+.key-btn.shortcut-btn:active {
+  background: #d97706;
+  color: #ffffff;
+}
+
 /* Touch Ripple Indicator */
 .touch-indicator {
   position: absolute;
@@ -336,4 +367,23 @@ html, body {
   pointer-events: none;
   width: 1px;
   height: 1px;
+}
+
+.hidden-key-input {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0.01;
+  pointer-events: auto;
+  border: none;
+  outline: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  z-index: 1;
 }

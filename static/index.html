@@ -46,11 +46,16 @@
       <!-- Special Keys Row -->
       <div class="keys-scroll-container">
         <div class="keys-row">
+          <button id="btn-focus-soft-kbd" class="key-btn special-btn" title="Open Phone Soft Keyboard">📱 Keyboard</button>
           <button class="key-btn" data-key="Escape">Esc</button>
           <button class="key-btn" data-key="Tab">Tab</button>
           <button class="key-btn mod-key" id="mod-ctrl" data-key="Control_L">Ctrl</button>
           <button class="key-btn mod-key" id="mod-alt" data-key="Alt_L">Alt</button>
           <button class="key-btn mod-key" id="mod-super" data-key="Super_L">Super</button>
+          <button class="key-btn shortcut-btn" id="btn-ctrl-c" title="Copy / Cancel">Ctrl+C</button>
+          <button class="key-btn shortcut-btn" id="btn-ctrl-v" title="Paste">Ctrl+V</button>
+          <button class="key-btn shortcut-btn" id="btn-ctrl-z" title="Undo">Ctrl+Z</button>
+          <button class="key-btn" data-key="Space">␣ Space</button>
           <button class="key-btn" data-key="Return">Enter</button>
           <button class="key-btn" data-key="BackSpace">⌫</button>
           <button class="key-btn" data-key="Delete">Del</button>
@@ -62,14 +67,15 @@
       </div>
 
       <!-- Quick Text Input Row for typing/pasting -->
-      <div class="text-input-row">
-        <input type="text" id="quick-text-input" placeholder="Type or paste text to laptop..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-        <button id="btn-send-text" class="action-btn">Send</button>
-      </div>
+      <form id="quick-text-form" class="text-input-row" onsubmit="return false;">
+        <input type="text" id="quick-text-input" placeholder="Type command or text to laptop..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+        <button id="btn-send-text" type="submit" class="action-btn">Send</button>
+        <button id="btn-send-enter" type="button" class="action-btn secondary-btn" title="Send text and press Enter">Send ↵</button>
+      </form>
     </div>
 
     <!-- Hidden input to invoke native phone virtual keyboard -->
-    <input type="text" id="hidden-key-input" class="visually-hidden" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    <input type="text" id="hidden-key-input" class="hidden-key-input" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go">
 
     <!-- Auth Modal Dialog -->
     <div id="auth-modal" class="modal-overlay hidden">

@@ -20,8 +20,14 @@
   const btnKbd = document.getElementById("btn-kbd");
   const btnFullscreen = document.getElementById("btn-fullscreen");
   const keyboardDrawer = document.getElementById("keyboard-drawer");
+  const quickTextForm = document.getElementById("quick-text-form");
   const quickTextInput = document.getElementById("quick-text-input");
   const btnSendText = document.getElementById("btn-send-text");
+  const btnSendEnter = document.getElementById("btn-send-enter");
+  const btnFocusSoftKbd = document.getElementById("btn-focus-soft-kbd");
+  const btnCtrlC = document.getElementById("btn-ctrl-c");
+  const btnCtrlV = document.getElementById("btn-ctrl-v");
+  const btnCtrlZ = document.getElementById("btn-ctrl-z");
   const hiddenKeyInput = document.getElementById("hidden-key-input");
 
   const authModal = document.getElementById("auth-modal");
@@ -46,37 +52,39 @@
   // Active modifier keys (latched)
   const activeModifiers = new Set();
 
-  // Keysym mapping for common keys
-  const KEYSYM_MAP = {
-    Escape: 0xff1b,
-    Tab: 0xff09,
-    Return: 0xff0d,
-    Enter: 0xff0d,
-    BackSpace: 0xff08,
-    Backspace: 0xff08,
-    Delete: 0xffff,
-    Control_L: 0xffe3,
-    Control: 0xffe3,
-    Alt_L: 0xffe9,
-    Alt: 0xffe9,
-    Super_L: 0xffeb,
-    Meta: 0xffeb,
-    Shift_L: 0xffe1,
-    Shift: 0xffe1,
-    Left: 0xff51,
-    ArrowLeft: 0xff51,
-    Up: 0xff52,
-    ArrowUp: 0xff52,
-    Right: 0xff53,
-    ArrowRight: 0xff53,
-    Down: 0xff54,
-    ArrowDown: 0xff54,
-    Home: 0xff50,
-    End: 0xff57,
-    Page_Up: 0xff55,
-    PageUp: 0xff55,
-    Page_Down: 0xff56,
-    PageDown: 0xff56,
+  // Key mapping for special keys: keysym and Linux evdev keycode
+  const KEY_INFO = {
+    Escape: { keysym: 0xff1b, keycode: 1 },
+    Tab: { keysym: 0xff09, keycode: 15 },
+    Return: { keysym: 0xff0d, keycode: 28 },
+    Enter: { keysym: 0xff0d, keycode: 28 },
+    BackSpace: { keysym: 0xff08, keycode: 14 },
+    Backspace: { keysym: 0xff08, keycode: 14 },
+    Delete: { keysym: 0xffff, keycode: 111 },
+    Control_L: { keysym: 0xffe3, keycode: 29 },
+    Control: { keysym: 0xffe3, keycode: 29 },
+    Alt_L: { keysym: 0xffe9, keycode: 56 },
+    Alt: { keysym: 0xffe9, keycode: 56 },
+    Super_L: { keysym: 0xffeb, keycode: 125 },
+    Meta: { keysym: 0xffeb, keycode: 125 },
+    Shift_L: { keysym: 0xffe1, keycode: 42 },
+    Shift: { keysym: 0xffe1, keycode: 42 },
+    Space: { keysym: 0x0020, keycode: 57 },
+    " ": { keysym: 0x0020, keycode: 57 },
+    Left: { keysym: 0xff51, keycode: 105 },
+    ArrowLeft: { keysym: 0xff51, keycode: 105 },
+    Up: { keysym: 0xff52, keycode: 103 },
+    ArrowUp: { keysym: 0xff52, keycode: 103 },
+    Right: { keysym: 0xff53, keycode: 106 },
+    ArrowRight: { keysym: 0xff53, keycode: 106 },
+    Down: { keysym: 0xff54, keycode: 108 },
+    ArrowDown: { keysym: 0xff54, keycode: 108 },
+    Home: { keysym: 0xff50, keycode: 102 },
+    End: { keysym: 0xff57, keycode: 107 },
+    Page_Up: { keysym: 0xff55, keycode: 104 },
+    PageUp: { keysym: 0xff55, keycode: 104 },
+    Page_Down: { keysym: 0xff56, keycode: 109 },
+    PageDown: { keysym: 0xff56, keycode: 109 },
   };
 
   // --- Initialization & Auth ---
@@ -336,8 +344,32 @@
     sendJson({ type: "pointer_axis", dx, dy });
   }
 
-  function sendKeyClick(keysym) {
-    sendJson({ type: "key_click", keysym });
+  function sendKeyClick(keysym, keycode = null) {
+    sendJson({ type: "key_click", keysym, keycode });
+  }
+
+  function sendKeyDown(keysym, keycode = null) {
+    sendJson({ type: "key_down", keysym, keycode });
+  }
+
+  function sendKeyUp(keysym, keycode = null) {
+    sendJson({ type: "key_up", keysym, keycode });
+  }
+
+  function sendText(text) {
+    if (text) {
+      sendJson({ type: "text", text });
+    }
+  }
+
+  function sendKeyChord(modKeycode, modKeysym, keycode, keysym) {
+    sendKeyDown(modKeysym, modKeycode);
+    setTimeout(() => {
+      sendKeyClick(keysym, keycode);
+      setTimeout(() => {
+        sendKeyUp(modKeysym, modKeycode);
+      }, 20);
+    }, 20);
   }
 
   // --- Touch Gesture Engine ---
@@ -497,12 +529,39 @@
     }
   });
 
+  // --- Native Phone Keyboard State & Sentinel Management ---
+  const DUMMY_SENTINEL = "   "; // 3 spaces sentinel to guarantee delete events on mobile keyboards
+  let lastHiddenValue = DUMMY_SENTINEL;
+  hiddenKeyInput.value = DUMMY_SENTINEL;
+
+  function resetHiddenInput() {
+    hiddenKeyInput.value = DUMMY_SENTINEL;
+    lastHiddenValue = DUMMY_SENTINEL;
+  }
+
+  function focusSoftKeyboard() {
+    resetHiddenInput();
+    hiddenKeyInput.focus();
+  }
+
   btnKbd.addEventListener("click", () => {
-    keyboardDrawer.classList.toggle("hidden");
-    if (!keyboardDrawer.classList.contains("hidden")) {
-      hiddenKeyInput.focus();
+    const isHidden = keyboardDrawer.classList.contains("hidden");
+    if (isHidden) {
+      keyboardDrawer.classList.remove("hidden");
+      btnKbd.classList.add("active");
+      focusSoftKeyboard();
+    } else {
+      keyboardDrawer.classList.add("hidden");
+      btnKbd.classList.remove("active");
+      hiddenKeyInput.blur();
     }
   });
+
+  if (btnFocusSoftKbd) {
+    btnFocusSoftKbd.addEventListener("click", () => {
+      focusSoftKeyboard();
+    });
+  }
 
   btnFullscreen.addEventListener("click", () => {
     if (!document.fullscreenElement) {
@@ -514,29 +573,35 @@
 
   // --- Special Keys & Keyboard Drawer ---
   document.querySelectorAll(".key-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
       const keyName = btn.getAttribute("data-key");
-      const keysym = KEYSYM_MAP[keyName];
-      if (!keysym) return;
+      if (!keyName) return;
+
+      const keyObj = KEY_INFO[keyName];
+      if (!keyObj) return;
+
+      const { keysym, keycode } = keyObj;
 
       if (btn.classList.contains("mod-key")) {
         // Modifier key latching (Ctrl, Alt, Super)
         if (activeModifiers.has(keysym)) {
           activeModifiers.delete(keysym);
           btn.classList.remove("active");
-          sendJson({ type: "key_up", keysym });
+          sendKeyUp(keysym, keycode);
         } else {
           activeModifiers.add(keysym);
           btn.classList.add("active");
-          sendJson({ type: "key_down", keysym });
+          sendKeyDown(keysym, keycode);
         }
       } else {
         // Normal special key click
-        sendKeyClick(keysym);
+        sendKeyClick(keysym, keycode);
 
         // If modifiers were active, release them after key chord
         activeModifiers.forEach((modKeysym) => {
-          sendJson({ type: "key_up", keysym: modKeysym });
+          const modObj = Object.values(KEY_INFO).find((v) => v.keysym === modKeysym);
+          sendKeyUp(modKeysym, modObj ? modObj.keycode : null);
         });
         activeModifiers.clear();
         document.querySelectorAll(".mod-key").forEach((m) => m.classList.remove("active"));
@@ -544,30 +609,148 @@
     });
   });
 
-  // Text send button
-  btnSendText.addEventListener("click", () => {
+  // Dedicated Shortcut Buttons
+  if (btnCtrlC) {
+    btnCtrlC.addEventListener("click", () => {
+      sendKeyChord(29, 0xffe3, 46, 0x0063); // Ctrl + C
+    });
+  }
+  if (btnCtrlV) {
+    btnCtrlV.addEventListener("click", () => {
+      sendKeyChord(29, 0xffe3, 47, 0x0076); // Ctrl + V
+    });
+  }
+  if (btnCtrlZ) {
+    btnCtrlZ.addEventListener("click", () => {
+      sendKeyChord(29, 0xffe3, 44, 0x007a); // Ctrl + Z
+    });
+  }
+
+  // --- Quick Text Form & Input ---
+  function submitQuickText(andEnter = false) {
     const text = quickTextInput.value;
     if (text) {
-      sendJson({ type: "text", text });
+      sendText(text);
+      if (andEnter) {
+        setTimeout(() => sendKeyClick(0xff0d, 28), 30);
+      }
       quickTextInput.value = "";
+    } else if (andEnter) {
+      sendKeyClick(0xff0d, 28);
     }
-  });
+  }
+
+  if (quickTextForm) {
+    quickTextForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      submitQuickText(false);
+    });
+  }
+
+  if (btnSendText) {
+    btnSendText.addEventListener("click", () => {
+      submitQuickText(false);
+    });
+  }
+
+  if (btnSendEnter) {
+    btnSendEnter.addEventListener("click", () => {
+      submitQuickText(true);
+    });
+  }
 
   quickTextInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") {
-      btnSendText.click();
+      e.preventDefault();
+      submitQuickText(false);
     }
   });
 
-  // Native phone keyboard interception via hidden input
+  // --- Native Soft Keyboard Interception (Android & iOS) ---
+  hiddenKeyInput.addEventListener("beforeinput", (e) => {
+    if (e.inputType === "deleteContentBackward") {
+      e.preventDefault();
+      sendKeyClick(0xff08, 14); // Backspace
+      resetHiddenInput();
+      return;
+    }
+    if (e.inputType === "deleteContentForward") {
+      e.preventDefault();
+      sendKeyClick(0xffff, 111); // Delete
+      resetHiddenInput();
+      return;
+    }
+    if (e.inputType === "insertLineBreak" || e.inputType === "insertParagraph") {
+      e.preventDefault();
+      sendKeyClick(0xff0d, 28); // Enter
+      resetHiddenInput();
+      return;
+    }
+    if (e.data) {
+      e.preventDefault();
+      sendText(e.data);
+      resetHiddenInput();
+      return;
+    }
+  });
+
+  hiddenKeyInput.addEventListener("input", (e) => {
+    const currentVal = hiddenKeyInput.value;
+    if (e.inputType === "deleteContentBackward" || currentVal.length < lastHiddenValue.length) {
+      const deleteCount = Math.max(1, lastHiddenValue.length - currentVal.length);
+      for (let i = 0; i < deleteCount; i++) {
+        sendKeyClick(0xff08, 14);
+      }
+    } else if (currentVal.length > lastHiddenValue.length) {
+      const inserted = currentVal.slice(lastHiddenValue.length);
+      if (inserted) {
+        sendText(inserted);
+      }
+    } else if (e.data) {
+      sendText(e.data);
+    }
+    resetHiddenInput();
+  });
+
+  hiddenKeyInput.addEventListener("compositionend", (e) => {
+    if (e.data) {
+      sendText(e.data);
+    }
+    resetHiddenInput();
+  });
+
   hiddenKeyInput.addEventListener("keydown", (e) => {
     const key = e.key;
-    if (KEYSYM_MAP[key]) {
+    // IME keypresses on mobile virtual keyboards (Android) emit keyCode 229 or "Unidentified"
+    if (key === "Unidentified" || e.keyCode === 229) {
+      return; // Handled by beforeinput / input
+    }
+
+    if (key === "Backspace") {
       e.preventDefault();
-      sendKeyClick(KEYSYM_MAP[key]);
-    } else if (key.length === 1) {
+      sendKeyClick(0xff08, 14);
+      resetHiddenInput();
+    } else if (key === "Enter") {
       e.preventDefault();
-      sendJson({ type: "text", text: key });
+      sendKeyClick(0xff0d, 28);
+      resetHiddenInput();
+    } else if (key === "Tab") {
+      e.preventDefault();
+      sendKeyClick(0xff09, 15);
+      resetHiddenInput();
+    } else if (key === "Escape") {
+      e.preventDefault();
+      sendKeyClick(0xff1b, 1);
+      resetHiddenInput();
+    } else if (KEY_INFO[key]) {
+      e.preventDefault();
+      const { keysym, keycode } = KEY_INFO[key];
+      sendKeyClick(keysym, keycode);
+      resetHiddenInput();
+    } else if (key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      e.preventDefault();
+      sendText(key);
+      resetHiddenInput();
     }
   });
 

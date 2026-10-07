@@ -287,22 +287,30 @@ class RdpServer:
 
                 elif msg_type == "key_down":
                     keysym = msg.get("keysym")
-                    if keysym is not None:
+                    keycode = msg.get("keycode")
+                    if keycode is not None:
+                        self.portal.notify_keyboard_keycode(keycode, 1)
+                    elif keysym is not None:
                         self.portal.notify_keyboard_keysym(keysym, 1)
 
                 elif msg_type == "key_up":
                     keysym = msg.get("keysym")
-                    if keysym is not None:
+                    keycode = msg.get("keycode")
+                    if keycode is not None:
+                        self.portal.notify_keyboard_keycode(keycode, 0)
+                    elif keysym is not None:
                         self.portal.notify_keyboard_keysym(keysym, 0)
 
                 elif msg_type == "key_click":
                     keysym = msg.get("keysym")
-                    if keysym is not None:
-                        self.portal.send_key_click(keysym)
+                    keycode = msg.get("keycode")
+                    print(f"[input] Key click: keycode={keycode}, keysym={hex(keysym) if keysym else None}")
+                    self.portal.send_key_click(keysym=keysym, keycode=keycode)
 
                 elif msg_type == "text":
                     text = msg.get("text", "")
                     if text:
+                        print(f"[input] Text typed: {repr(text)}")
                         self.portal.send_text(text)
 
         except websockets.exceptions.ConnectionClosed:
